@@ -10,7 +10,7 @@ Credentials lus depuis les variables d'environnement :
   RTE_CLIENT_SECRET  (GitHub Secret)
 """
 import requests, json, base64, os, sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 CLIENT_ID     = os.environ.get("RTE_CLIENT_ID",     "66c46445-121c-4e9a-98c3-89488f393a19")
 CLIENT_SECRET = os.environ.get("RTE_CLIENT_SECRET",  "1293d144-c33c-42b7-b66f-2fe43d0c55fa")
@@ -77,17 +77,24 @@ def build_json(units):
 
 
 def main():
-    now   = datetime.now().astimezone().replace(minute=0, second=0, microsecond=0)
-    start = now - timedelta(hours=HEURES)
-    print(f"[fetch] {now:%Y-%m-%d %H:%M:%S} — fenêtre {HEURES}h")
+    # GitHub Actions tourne en UTC
+    # RTE publie en H+1 → reculer end d'au moins 2h pour avoir des données
+    now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    end     = now_utc - timedelta(hours=2)
+    start   = end - timedelta(hours=24)
+
+    print(f"[fetch] {now_utc:%Y-%m-%d %H:%M:%S} UTC — fenêtre {start} → {end}")
+
     token = get_token()
-    units = fetch_per_unit(token, start, now)
+    units = fetch_per_unit(token, start, end)
     print(f"[API] {len(units)} unités reçues")
     data  = build_json(units)
+
     if not data["parcs"]:
         print("[warn] Aucun parc WIND_OFFSHORE — vérifier la période")
     else:
         print(f"[OK] {len(data['parcs'])} parc(s) : {[p['nom'] for p in data['parcs']]}")
+
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"[fichier] Écrit : {OUTPUT_FILE}")
