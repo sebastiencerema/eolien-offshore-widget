@@ -15,7 +15,8 @@ from datetime import datetime, timedelta, timezone
 CLIENT_ID     = os.environ.get("RTE_CLIENT_ID",     "66c46445-121c-4e9a-98c3-89488f393a19")
 CLIENT_SECRET = os.environ.get("RTE_CLIENT_SECRET",  "1293d144-c33c-42b7-b66f-2fe43d0c55fa")
 OUTPUT_FILE   = "data_eolien.json"
-HEURES        = 30
+
+JOURS = 4   # Nombre de jours d'historique souhaité
 
 TOKEN_URL = "https://digital.iservices.rte-france.com/token/oauth/"
 API_BASE  = "https://digital.iservices.rte-france.com/open_api/actual_generation/v1"
@@ -77,27 +78,58 @@ def build_json(units):
 
 
 def main():
-    # GitHub Actions tourne en UTC
-    # RTE publie en H+1 → reculer end d'au moins 2h pour avoir des données
     now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    end     = now_utc - timedelta(hours=2)
-    start   = end - timedelta(hours=24)
+    end_global   = now_utc - timedelta(hours=2)
+    start_global = end_global - timedelta(days=JOURS)
 
-    print(f"[fetch] {now_utc:%Y-%m-%d %H:%M:%S} UTC — fenêtre {start} → {end}")
+    print(f"[fetch] {now_utc:%Y-%m-%d %H:%M} UTC — fenêtre {JOURS} jours")
+    print(f"[fetch] {start_global} → {end_global}")
 
     token = get_token()
-    units = fetch_per_unit(token, start, end)
-    print(f"[API] {len(units)} unités reçues")
-    data  = build_json(units)
 
-    if not data["parcs"]:
-        print("[warn] Aucun parc WIND_OFFSHORE — vérifier la période")
+    # Découper en tranches de 24h et fusionner
+    all_units = {}   # eic_code → {nom, eic_code, valeurs accumulées}
+    cursor = start_global
+    while cursor < end_global:
+        slice_end = min(cursor + timedelta(hours=24), end_global)
+        print(f"[slice] {cursor} → {slice_end}")
+        units = fetch_per_unit(token, cursor, slice_end)
+        for unit in units:
+            offshore = [v for v in unit.get("values", [])
+                        if v.get("production_type") == "WIND_OFFSHORE"
+                        and v.get("value") is not None]
+            if not offshore:
+                continue
+            eic = unit["unit"]["eic_code"]
+            if eic not in all_units:
+                all_units[eic] = {"nom": unit["unit"]["name"],
+                                  "eic_code": eic, "serie": []}
+            all_units[eic]["serie"] += [{"t": v["start_date"], "mw": v["value"]}
+                                         for v in offshore]
+        cursor = slice_end
+
+    # Dédoublonner et trier chaque série
+    parcs = []
+    for u in all_units.values():
+        seen = {}
+        for pt in u["serie"]:
+            seen[pt["t"]] = pt["mw"]
+        u["serie"] = [{"t": t, "mw": mw} for t, mw in sorted(seen.items())]
+        parcs.append(u)
+        print(f"[parc] {u['nom']} — {len(u['serie'])} points")
+
+    data = {"generated_at": datetime.now().astimezone().isoformat(),
+            "source": "RTE Actual Generation API v1.1",
+            "parcs": parcs}
+
+    if not parcs:
+        print("[warn] Aucun parc WIND_OFFSHORE trouvé")
     else:
-        print(f"[OK] {len(data['parcs'])} parc(s) : {[p['nom'] for p in data['parcs']]}")
+        print(f"[OK] {len(parcs)} parc(s) : {[p['nom'] for p in parcs]}")
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"[fichier] Écrit : {OUTPUT_FILE}")
+    print(f"[fichier] Écrit : {OUTPUT_FILE} ({os.path.getsize(OUTPUT_FILE)//1024} Ko)")
 
 
 if __name__ == "__main__":
