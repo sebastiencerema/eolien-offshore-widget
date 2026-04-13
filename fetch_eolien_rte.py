@@ -49,18 +49,17 @@ def get_token():
 
 
 def fetch_per_unit(token, start, end):
-    # TEST : utiliser per_production_type au lieu de per_unit
+    # Test minimal : 2h sur les données les plus récentes
+    test_end   = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
+    test_start = test_end - timedelta(hours=2)
     url = (f"{API_BASE}/actual_generations_per_production_type"
-           f"?start_date={fmt_rte(start)}&end_date={fmt_rte(end)}")
+           f"?start_date={fmt_rte(test_start)}&end_date={fmt_rte(test_end)}")
+    print(f"[TEST] {test_start} → {test_end}")
     print(f"[API] GET {url}")
     resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
-    if not resp.ok:
-        print(f"[API] Erreur {resp.status_code} : {resp.text[:300]}", file=sys.stderr)
-        resp.raise_for_status()
-    # Adapter la réponse au même format
-    items = resp.json().get("actual_generations_per_production_type", [])
-    print(f"[API] types reçus : {[i.get('production_type') for i in items]}")
-    return []   # juste pour tester
+    print(f"[API] Status : {resp.status_code}")
+    print(f"[API] Body : {resp.text[:500]}")
+    return []
 
 
 def build_json(units):
