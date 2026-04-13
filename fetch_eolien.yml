@@ -1,43 +1,38 @@
-# .gitlab-ci.yml
-# Remplace le fetch_eolien.yml GitHub Actions
-#
-# SETUP :
-# 1. Settings → CI/CD → Variables → ajouter :
-#      RTE_CLIENT_ID      (Masked, Protected)
-#      RTE_CLIENT_SECRET  (Masked, Protected)
-#      PUSH_TOKEN         (Personal Access Token avec scope "write_repository")
-#
-# 2. Settings → CI/CD → Schedules → New schedule :
-#      Cron : 0 * * * *   (toutes les heures)
-#      Target branch : main
+name: Fetch eolien offshore RTE
 
-stages:
-  - fetch
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
-fetch_eolien:
-  stage: fetch
-  image: python:3.11-slim
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-  variables:
-    GIT_STRATEGY: clone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  script:
-    # Dépendances
-    - pip install --quiet requests
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    # Récupération des données RTE
-    - python fetch_eolien_rte.py
+      - name: Install dependencies
+        run: pip install requests
 
-    # Commit et push du JSON mis à jour
-    - git config user.email "ci-bot@gitlab"
-    - git config user.name  "GitLab CI"
-    - git remote set-url origin "https://oauth2:${PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-    - git add data_eolien.json
-    - git diff --cached --quiet && echo "[skip] Aucun changement" || (
-        git commit -m "data: mise à jour éolien offshore $(date -u +%Y-%m-%dT%H:%M)Z" &&
-        git push origin HEAD:main
-      )
+      - name: Fetch RTE data
+        env:
+          RTE_CLIENT_ID: ${{ secrets.RTE_CLIENT_ID }}
+          RTE_CLIENT_SECRET: ${{ secrets.RTE_CLIENT_SECRET }}
+        run: python fetch_eolien_rte.py
 
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'   # cron horaire
-    - if: '$CI_PIPELINE_SOURCE == "web"'         # déclenchement manuel
+      - name: Commit et push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data_eolien.json
+          git diff --cached --quiet || git commit -m "data: eolien offshore update"
+          git push
