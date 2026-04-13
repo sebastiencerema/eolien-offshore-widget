@@ -77,7 +77,7 @@ def build_json(units):
 
 
 def main():
-    now   = datetime.now().astimezone()
+    now   = datetime.now().astimezone().replace(minute=0, second=0, microsecond=0)
     start = now - timedelta(hours=HEURES)
     print(f"[fetch] {now:%Y-%m-%d %H:%M:%S} — fenêtre {HEURES}h")
     token = get_token()
